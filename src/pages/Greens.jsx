@@ -177,67 +177,188 @@ function PurchaseForm({ open, coffee, onClose, onSaved }) {
   )
 }
 
-// ── PURCHASE HISTORY MODAL ───────────────────────────────────────
-function PurchaseHistory({ open, coffee, onClose }) {
+// ── PURCHASE HISTORY MODAL (with edit + delete) ─────────────────
+function PurchaseHistory({ open, coffee, onClose, onSaved }) {
+  const toast = useToast()
   const [purchases, setPurchases] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading]     = useState(true)
+  const [editing, setEditing]     = useState(null)   // purchase row being edited
+  const [editForm, setEditForm]   = useState({})
+  const [deleting, setDeleting]   = useState(null)   // purchase row awaiting delete confirm
+  const [saving, setSaving]       = useState(false)
 
-  useEffect(() => {
-    if (!open || !coffee) return
+  const load = () => {
+    if (!coffee) return
     setLoading(true)
     supabase.from('green_purchases').select('*')
       .eq('coffee_id', coffee.coffee_id)
       .order('purchase_date', { ascending: false })
       .then(({ data }) => { setPurchases(data||[]); setLoading(false) })
-  }, [open, coffee])
+  }
+
+  useEffect(() => { if (open && coffee) load() }, [open, coffee])
+
+  const startEdit = (p) => {
+    setEditing(p)
+    setEditForm({
+      purchase_date: p.purchase_date,
+      purchased_kg:  String(p.purchased_kg),
+      cost_per_kg:   String(p.cost_per_kg),
+      supplier:      p.supplier||'',
+      notes:         p.notes||'',
+    })
+  }
+
+  const handleSaveEdit = async () => {
+    setSaving(true)
+    const updates = {
+      purchase_date: editForm.purchase_date,
+      purchased_kg:  parseFloat(editForm.purchased_kg)||0,
+      cost_per_kg:   parseFloat(editForm.cost_per_kg)||0,
+      supplier:      editForm.supplier,
+      notes:         editForm.notes,
+    }
+    const { error } = await supabase.from('green_purchases').update(updates).eq('id', editing.id)
+    if (error) { toast('Error: '+error.message, true); setSaving(false); return }
+
+    // Keep the linked inventory movement in sync
+    await supabase.from('inventory_movements')
+      .update({
+        quantity_kg: updates.purchased_kg,
+        note: `Purchase: ${updates.purchased_kg} kg @ R${updates.cost_per_kg}/kg (edited)`,
+      })
+      .eq('reference_id', editing.id)
+      .eq('movement_type', 'purchase_in')
+
+    setSaving(false)
+    toast('Purchase updated')
+    setEditing(null)
+    load()
+    onSaved?.()
+  }
+
+  const handleDelete = async (p) => {
+    const { error } = await supabase.from('green_purchases').delete().eq('id', p.id)
+    if (error) { toast('Error: '+error.message, true); return }
+
+    // Remove the linked movement so stock recalculates correctly
+    await supabase.from('inventory_movements')
+      .delete()
+      .eq('reference_id', p.id)
+      .eq('movement_type', 'purchase_in')
+
+    toast('Purchase removed — stock corrected')
+    setDeleting(null)
+    load()
+    onSaved?.()
+  }
 
   if (!open || !coffee) return null
-  const total = purchases.reduce((s,p)=>s+Number(p.purchased_kg),0)
+
+  const total    = purchases.reduce((s,p)=>s+Number(p.purchased_kg),0)
   const avgPrice = purchases.length ? purchases.reduce((s,p)=>s+Number(p.cost_per_kg),0)/purchases.length : 0
 
   return (
     <div className="overlay open" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="modal" style={{maxWidth:560}}>
+      <div className="modal" style={{maxWidth:620}}>
         <div className="modal-hd">
-          <div className="modal-title">Purchase History — {coffee.coffee_id}</div>
-          <button className="btn btn-ghost" onClick={onClose}>✕</button>
+          <div className="modal-title">
+            {editing ? `Edit Purchase — ${coffee.coffee_id}` : `Purchase History — ${coffee.coffee_id}`}
+          </div>
+          <button className="btn btn-ghost" onClick={()=>{ setEditing(null); setDeleting(null); onClose() }}>✕</button>
         </div>
         <div className="modal-body" style={{padding:'16px 26px'}}>
-          {loading ? <div className="loading">Loading…</div> : (
+
+          {/* ── EDIT FORM ── */}
+          {editing && (
             <>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:16}}>
-                {[['Total Purchased',total.toFixed(1)+' kg'],['Purchases',purchases.length],['Avg Price','R'+avgPrice.toFixed(2)+'/kg']].map(([l,v])=>(
-                  <div key={l} style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:6,padding:'10px 12px',textAlign:'center'}}>
-                    <div style={{fontSize:'8px',letterSpacing:'2px',textTransform:'uppercase',color:'var(--text3)',marginBottom:4}}>{l}</div>
-                    <div style={{fontFamily:'var(--font-mono)',fontSize:15,color:'var(--gold)'}}>{v}</div>
-                  </div>
-                ))}
+              <div style={{background:'var(--bg4)',border:'1px solid var(--gold-dim)',borderRadius:6,padding:'14px 16px',marginBottom:16,fontSize:11,color:'var(--text3)'}}>
+                Editing this purchase will update both the purchase record and the inventory movement that drove stock.
               </div>
-              {!purchases.length
-                ? <div className="empty">No purchases yet</div>
-                : <div className="table-wrap">
-                    <table>
-                      <thead><tr><th>Date</th><th>Quantity</th><th>Price/kg</th><th>Total</th><th>Notes</th></tr></thead>
-                      <tbody>
-                        {purchases.map(p=>(
-                          <tr key={p.id}>
-                            <td>{fmtDate(p.purchase_date)}</td>
-                            <td>{Number(p.purchased_kg).toFixed(1)} kg</td>
-                            <td>R{Number(p.cost_per_kg).toFixed(2)}</td>
-                            <td style={{fontFamily:'var(--font-mono)'}}>R{(Number(p.purchased_kg)*Number(p.cost_per_kg)).toFixed(0)}</td>
-                            <td className="td-muted">{p.notes||'—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-              }
+              <div className="form-grid">
+                <div className="form-group"><label>Purchase Date</label>
+                  <input type="date" value={editForm.purchase_date} onChange={e=>setEditForm(f=>({...f,purchase_date:e.target.value}))}/>
+                </div>
+                <div className="form-group"><label>Quantity (kg)</label>
+                  <input type="number" step="0.1" value={editForm.purchased_kg} onChange={e=>setEditForm(f=>({...f,purchased_kg:e.target.value}))}/>
+                </div>
+                <div className="form-group"><label>Price per kg (R)</label>
+                  <input type="number" step="0.01" value={editForm.cost_per_kg} onChange={e=>setEditForm(f=>({...f,cost_per_kg:e.target.value}))}/>
+                </div>
+                <div className="form-group"><label>Supplier</label>
+                  <input value={editForm.supplier} onChange={e=>setEditForm(f=>({...f,supplier:e.target.value}))}/>
+                </div>
+                <div className="form-group full"><label>Notes</label>
+                  <textarea value={editForm.notes} onChange={e=>setEditForm(f=>({...f,notes:e.target.value}))}/>
+                </div>
+              </div>
+              <div className="form-actions" style={{padding:'12px 0 0',borderTop:'none'}}>
+                <button className="btn btn-outline" onClick={()=>setEditing(null)}>Cancel</button>
+                <button className="btn btn-gold" onClick={handleSaveEdit} disabled={saving}>{saving?'Saving…':'Save Changes'}</button>
+              </div>
             </>
           )}
+
+          {/* ── LIST VIEW ── */}
+          {!editing && (
+            loading ? <div className="loading">Loading…</div> : (
+              <>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:16}}>
+                  {[['Total Purchased',total.toFixed(1)+' kg'],['Purchases',purchases.length],['Avg Price','R'+avgPrice.toFixed(2)+'/kg']].map(([l,v])=>(
+                    <div key={l} style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:6,padding:'10px 12px',textAlign:'center'}}>
+                      <div style={{fontSize:'8px',letterSpacing:'2px',textTransform:'uppercase',color:'var(--text3)',marginBottom:4}}>{l}</div>
+                      <div style={{fontFamily:'var(--font-mono)',fontSize:15,color:'var(--gold)'}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                {!purchases.length
+                  ? <div className="empty">No purchases yet</div>
+                  : <div className="table-wrap">
+                      <table>
+                        <thead><tr><th>Date</th><th>Qty</th><th>Price/kg</th><th>Total</th><th>Supplier</th><th>Notes</th><th></th></tr></thead>
+                        <tbody>
+                          {purchases.map(p=>(
+                            deleting?.id === p.id
+                              ? (
+                                <tr key={p.id} style={{background:'rgba(139,58,42,.15)'}}>
+                                  <td colSpan="5" style={{color:'var(--red2)',fontSize:12}}>Remove {Number(p.purchased_kg).toFixed(1)} kg on {fmtDate(p.purchase_date)}? This reverses the stock.</td>
+                                  <td colSpan="2">
+                                    <div style={{display:'flex',gap:6}}>
+                                      <button className="btn btn-danger btn-xs" onClick={()=>handleDelete(p)}>Confirm</button>
+                                      <button className="btn btn-outline btn-xs" onClick={()=>setDeleting(null)}>Cancel</button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ) : (
+                                <tr key={p.id}>
+                                  <td>{fmtDate(p.purchase_date)}</td>
+                                  <td>{Number(p.purchased_kg).toFixed(1)} kg</td>
+                                  <td>R{Number(p.cost_per_kg).toFixed(2)}</td>
+                                  <td style={{fontFamily:'var(--font-mono)'}}>R{(Number(p.purchased_kg)*Number(p.cost_per_kg)).toFixed(0)}</td>
+                                  <td className="td-muted">{p.supplier||'—'}</td>
+                                  <td className="td-muted">{p.notes||'—'}</td>
+                                  <td>
+                                    <div style={{display:'flex',gap:4}}>
+                                      <button className="btn btn-outline btn-xs" onClick={()=>startEdit(p)}>Edit</button>
+                                      <button className="btn btn-danger btn-xs" onClick={()=>setDeleting(p)}>Del</button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                }
+              </>
+            )
+          )}
         </div>
-        <div className="form-actions">
-          <button className="btn btn-gold" onClick={onClose}>Close</button>
-        </div>
+        {!editing && (
+          <div className="form-actions">
+            <button className="btn btn-gold" onClick={onClose}>Close</button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -360,6 +481,7 @@ export default function Greens() {
       <PurchaseHistory
         open={historyModal.open} coffee={historyModal.coffee}
         onClose={()=>setHistoryModal({open:false,coffee:null})}
+        onSaved={load}
       />
 
       {deleting&&(
