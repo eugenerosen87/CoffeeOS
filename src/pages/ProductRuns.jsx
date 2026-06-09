@@ -47,7 +47,7 @@ function ProductRunForm({ open, onClose, onSaved }) {
       .from('roasts')
       .select('id, coffee_id, date, roast_level, available_kg')
       .in('coffee_id', coffeeIds)
-      .eq('status', 'approved')
+      .in('status', ['approved', 'resting'])
       .eq('archived', false)
       .gt('available_kg', 0)
       .order('date', { ascending: false })
@@ -192,17 +192,17 @@ function ProductRunForm({ open, onClose, onSaved }) {
                         <span style={{fontSize:11,color:'var(--text3)',marginLeft:8}}>{r.percentage}% of blend</span>
                       </div>
                       {batches.length === 0 && (
-                        <span style={{fontSize:11,color:'var(--red2)'}}>⚠ No approved batches available</span>
+                        <span style={{fontSize:11,color:'var(--red2)'}}>⚠ No approved or resting batches available</span>
                       )}
                     </div>
                     <div className="form-grid" style={{gap:10}}>
                       <div className="form-group">
-                        <label>Batch (approved, stock available)</label>
+                        <label>Batch (approved / resting, stock available)</label>
                         <select value={sel.batch_id||''} onChange={e=>setSel(r.coffee_id,'batch_id',e.target.value)}>
                           <option value="">— Select batch —</option>
                           {batches.map(b=>(
                             <option key={b.id} value={b.id}>
-                              {b.id} · {ROAST_NAMES[b.roast_level]||b.roast_level} · {Number(b.available_kg||0).toFixed(2)} kg avail
+                              {b.id} · {ROAST_NAMES[b.roast_level]||b.roast_level} · {Number(b.available_kg||0).toFixed(2)} kg{b.status==='resting'?' (resting)':''}
                             </option>
                           ))}
                         </select>
