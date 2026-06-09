@@ -21,11 +21,13 @@ function ProductRunForm({ open, run, onClose, onSaved }) {
   const [runDate, setRunDate]             = useState('')
   const [notes, setNotes]                 = useState('')
   const [saving, setSaving]               = useState(false)
+  const [origAllocations, setOrigAllocations] = useState([]) // original allocs for the run being edited
 
   useEffect(() => {
     if (!open) return
     setSelected(''); setRecipe([]); setBatchSel({}); setUnitsPacked({}); setNotes('')
     setRunDate(new Date().toISOString().split('T')[0])
+    setOrigAllocations([])
     Promise.all([
       supabase.from('products').select('*').eq('archived', false).order('name'),
       supabase.from('formats').select('*').eq('active', true).order('sort_order'),
@@ -78,6 +80,7 @@ function ProductRunForm({ open, run, onClose, onSaved }) {
       available_kg: Number(b.available_kg) + (allocMap[b.id] || 0)
     }))
 
+    setOrigAllocations(allocs || [])
     setRecipe(rec)
     setBatches(allBatches)
 
@@ -101,15 +104,38 @@ function ProductRunForm({ open, run, onClose, onSaved }) {
     const coffeeIds = rec.map(r => r.coffee_id)
     const { data: batches } = await supabase
       .from('roasts')
-      .select('id, coffee_id, date, roast_level, available_kg')
+      .select('id, coffee_id, date, roast_level, available_kg, status')
       .in('coffee_id', coffeeIds)
       .in('status', ['approved', 'resting'])
       .eq('archived', false)
-      .gt('available_kg', 0)
       .order('date', { ascending: false })
 
+    // In edit mode: the original run's stock is still deducted in the DB.
+    // Merge in any originally-allocated batches that may now show 0 available,
+    // and add back what this run previously took so they appear selectable.
+    let merged = batches || []
+    if (isEditing && origAllocations.length) {
+      const origAllocMap = {}
+      origAllocations.forEach(a => { origAllocMap[a.batch_id] = Number(a.allocated_kg) })
+      const origBatchIds = origAllocations.map(a => a.batch_id)
+      const missingIds = origBatchIds.filter(id => !merged.find(b => b.id === id))
+      if (missingIds.length) {
+        const { data: extra } = await supabase.from('roasts')
+          .select('id, coffee_id, date, roast_level, available_kg, status')
+          .in('id', missingIds)
+        merged = [...merged, ...(extra || [])]
+      }
+      merged = merged.map(b => origAllocMap[b.id]
+        ? { ...b, available_kg: Number(b.available_kg) + origAllocMap[b.id] }
+        : b
+      )
+    }
+
+    // Filter out batches with no available stock (after restoration)
+    merged = merged.filter(b => Number(b.available_kg) > 0)
+
     setRecipe(rec)
-    setBatches(batches||[])
+    setBatches(merged)
     const init = {}
     rec.forEach(r => { init[r.coffee_id] = { batch_id:'', kg_to_use:'' } })
     setBatchSel(init)
