@@ -7,7 +7,8 @@ import { fmtDate, ROAST_NAMES } from '../lib/coffee'
 const WEIGHT_TO_SIZE = { 125:'125g', 250:'250g', 500:'500g', 1000:'1kg', 2000:'2kg' }
 
 // ── PRODUCT RUN FORM ─────────────────────────────────────────────
-function ProductRunForm({ open, onClose, onSaved }) {
+function ProductRunForm({ open, run, onClose, onSaved }) {
+  const isEditing = !!run
   const toast = useToast()
   const [products, setProducts]           = useState([])
   const [formats, setFormats]             = useState([])
@@ -31,8 +32,63 @@ function ProductRunForm({ open, onClose, onSaved }) {
       supabase.from('packaging').select('*').order('size'),
     ]).then(([{data:p},{data:f},{data:pk}]) => {
       setProducts(p||[]); setFormats(f||[]); setPackaging(pk||[])
+      if (run) loadRunForEdit(run)
     })
-  }, [open])
+  }, [open, run])
+
+  const loadRunForEdit = async (r) => {
+    setRunDate(r.run_date || new Date().toISOString().split('T')[0])
+    setNotes(r.notes || '')
+    setUnitsPacked(r.units_packed || {})
+    setSelected(r.product_id)
+
+    const [{ data: rec }, { data: allocs }] = await Promise.all([
+      supabase.from('product_recipe').select('*').eq('product_id', r.product_id),
+      supabase.from('batch_allocations').select('*').eq('product_run_id', r.id),
+    ])
+    if (!rec?.length) return
+
+    const coffeeIds = rec.map(x => x.coffee_id)
+    const allocMap = {}
+    allocs?.forEach(a => { allocMap[a.batch_id] = Number(a.allocated_kg) })
+    const allocBatchIds = allocs?.map(a => a.batch_id) || []
+
+    // Fetch available batches — include resting/approved with stock
+    const { data: available } = await supabase
+      .from('roasts')
+      .select('id, coffee_id, date, roast_level, available_kg, status')
+      .in('coffee_id', coffeeIds)
+      .in('status', ['approved', 'resting'])
+      .eq('archived', false)
+      .order('date', { ascending: false })
+
+    // Also fetch any allocated batches that may now be at 0 stock
+    const missingIds = allocBatchIds.filter(id => !(available||[]).find(b => b.id === id))
+    let extra = []
+    if (missingIds.length) {
+      const { data } = await supabase.from('roasts')
+        .select('id, coffee_id, date, roast_level, available_kg, status')
+        .in('id', missingIds)
+      extra = data || []
+    }
+
+    // Add back what this run previously took so the user sees true available
+    const allBatches = [...(available||[]), ...extra].map(b => ({
+      ...b,
+      available_kg: Number(b.available_kg) + (allocMap[b.id] || 0)
+    }))
+
+    setRecipe(rec)
+    setBatches(allBatches)
+
+    const init = {}
+    rec.forEach(x => { init[x.coffee_id] = { batch_id: '', kg_to_use: '' } })
+    allocs?.forEach(a => {
+      if (init[a.coffee_id] !== undefined)
+        init[a.coffee_id] = { batch_id: a.batch_id, kg_to_use: String(a.allocated_kg) }
+    })
+    setBatchSel(init)
+  }
 
   const handleProductSelect = async (productId) => {
     setSelected(productId); setRecipe([]); setBatchSel({})
@@ -98,8 +154,91 @@ function ProductRunForm({ open, onClose, onSaved }) {
     const packed = {}
     Object.entries(unitsPacked).forEach(([fid,v]) => { if (parseInt(v) > 0) packed[fid] = parseInt(v) })
 
+    if (isEditing) {
+      // ── EDIT PATH ──────────────────────────────────────────────
+      // 1. Load old allocations so we can reverse stock
+      const { data: oldAllocs } = await supabase
+        .from('batch_allocations').select('*').eq('product_run_id', run.id)
+
+      // 2. Restore available_kg to previously allocated batches
+      for (const a of (oldAllocs||[])) {
+        const { data: b } = await supabase.from('roasts').select('available_kg').eq('id', a.batch_id).single()
+        if (b) await supabase.from('roasts')
+          .update({ available_kg: Number(b.available_kg) + Number(a.allocated_kg) })
+          .eq('id', a.batch_id)
+      }
+
+      // 3. Restore old packaging bags
+      const { data: freshPkg } = await supabase.from('packaging').select('*').order('size')
+      if (run.units_packed) {
+        for (const [fid, units] of Object.entries(run.units_packed)) {
+          const fmt = formats.find(f => f.id === fid)
+          if (!fmt || fmt.is_wholesale) continue
+          const sizeKey = WEIGHT_TO_SIZE[fmt.weight_g]
+          if (!sizeKey) continue
+          const pkg = freshPkg?.find(p => p.size === sizeKey)
+          if (!pkg) continue
+          await supabase.from('packaging')
+            .update({ stock_units: (Number(pkg.stock_units)||0) + (parseInt(units)||0) })
+            .eq('id', pkg.id)
+        }
+      }
+
+      // 4. Delete old allocations
+      await supabase.from('batch_allocations').delete().eq('product_run_id', run.id)
+
+      // 5. Update product_run
+      const { error: updErr } = await supabase.from('product_runs').update({
+        product_id: selectedProductId,
+        run_date: runDate,
+        notes,
+        units_packed: packed,
+        total_kg: totalKgAllocated,
+      }).eq('id', run.id)
+      if (updErr) { toast('Error: '+updErr.message, true); setSaving(false); return }
+
+      // 6. Insert new allocations
+      const newAllocs = recipe.map(r => ({
+        product_run_id: run.id,
+        batch_id:       batchSel[r.coffee_id].batch_id,
+        coffee_id:      r.coffee_id,
+        allocated_kg:   parseFloat(batchSel[r.coffee_id].kg_to_use),
+        percentage:     r.percentage,
+      }))
+      await supabase.from('batch_allocations').insert(newAllocs)
+
+      // 7. Deduct new available_kg from batches
+      for (const r of recipe) {
+        const s = batchSel[r.coffee_id]
+        const batch = availableBatches.find(b => b.id === s.batch_id)
+        if (!batch) continue
+        const newAvail = Math.max(0, Number(batch.available_kg) - parseFloat(s.kg_to_use))
+        await supabase.from('roasts').update({ available_kg: newAvail }).eq('id', s.batch_id)
+      }
+
+      // 8. Deduct new packaging (use fresh data fetched above)
+      const { data: pkg2 } = await supabase.from('packaging').select('*').order('size')
+      for (const [fid, units] of Object.entries(packed)) {
+        const fmt = formats.find(f => f.id === fid)
+        if (!fmt || fmt.is_wholesale) continue
+        const sizeKey = WEIGHT_TO_SIZE[fmt.weight_g]
+        if (!sizeKey) continue
+        const pkg = pkg2?.find(p => p.size === sizeKey && (Number(p.stock_units)||0) > 0)
+        if (!pkg) continue
+        await supabase.from('packaging')
+          .update({ stock_units: Math.max(0, (Number(pkg.stock_units)||0) - units) })
+          .eq('id', pkg.id)
+      }
+
+      setSaving(false)
+      toast('Run updated — stock reversed and reapplied')
+      onSaved(); onClose()
+      return
+    }
+
+    // ── NEW RUN PATH ──────────────────────────────────────────────
     // 1. Insert product_run
-    const { data: run, error: runErr } = await supabase.from('product_runs').insert({
+    const { data: newRun, error: runErr } = await supabase.from('product_runs').insert({
       product_id: selectedProductId,
       run_date: runDate,
       notes,
@@ -111,7 +250,7 @@ function ProductRunForm({ open, onClose, onSaved }) {
 
     // 2. Insert batch_allocations
     const allocations = recipe.map(r => ({
-      product_run_id: run.id,
+      product_run_id: newRun.id,
       batch_id:       batchSel[r.coffee_id].batch_id,
       coffee_id:      r.coffee_id,
       allocated_kg:   parseFloat(batchSel[r.coffee_id].kg_to_use),
@@ -151,7 +290,7 @@ function ProductRunForm({ open, onClose, onSaved }) {
     <div className="overlay open" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="modal" style={{maxWidth:700}}>
         <div className="modal-hd">
-          <div className="modal-title">New Product Run</div>
+          <div className="modal-title">{isEditing ? 'Edit Product Run' : 'New Product Run'}</div>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
@@ -281,7 +420,7 @@ function ProductRunForm({ open, onClose, onSaved }) {
         <div className="form-actions">
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
           <button className="btn btn-gold" onClick={handleSave} disabled={saving||!recipe.length}>
-            {saving ? 'Saving…' : 'Record Run'}
+            {saving ? 'Saving…' : isEditing ? 'Update Run' : 'Record Run'}
           </button>
         </div>
       </div>
@@ -295,6 +434,8 @@ export default function ProductRuns() {
   const [formats, setFormats]   = useState([])
   const [loading, setLoading]   = useState(true)
   const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing]   = useState(null)
+  const [deleting, setDeleting] = useState(null)
   const [expanding, setExpanding] = useState(null)
   const [runDetails, setRunDetails] = useState({}) // { run_id: allocation[] }
   const toast = useToast()
@@ -333,7 +474,7 @@ export default function ProductRuns() {
           <div className="page-title">Product Runs</div>
           <div className="page-sub">Pack roasted batches into sellable formats</div>
         </div>
-        <button className="btn btn-gold" onClick={()=>setFormOpen(true)}>+ New Run</button>
+        <button className="btn btn-gold" onClick={()=>{setEditing(null);setFormOpen(true)}}>+ New Run</button>
       </div>
 
       <div className="stats-grid">
@@ -353,12 +494,12 @@ export default function ProductRuns() {
       <div className="table-wrap">
         <table>
           <thead><tr>
-            <th>Date</th><th>Product</th><th>Total Kg</th><th>Units Packed</th><th>Notes</th><th></th>
+            <th>Date</th><th>Product</th><th>Total Kg</th><th>Units Packed</th><th>Notes</th><th></th><th></th>
           </tr></thead>
           <tbody>
             {loading && <tr><td colSpan="6"><div className="loading">Loading…</div></td></tr>}
             {!loading && !runs.length && (
-              <tr><td colSpan="6">
+              <tr><td colSpan="7">
                 <div className="empty">
                   <div className="empty-icon">◉</div>
                   No product runs yet — click New Run to pack your first batch
@@ -390,10 +531,14 @@ export default function ProductRuns() {
                   </td>
                   <td className="td-muted">{r.notes||'—'}</td>
                   <td style={{color:'var(--text3)',fontSize:11,userSelect:'none'}}>{isOpen?'▲':'▼'}</td>
+                  <td onClick={e=>e.stopPropagation()} style={{whiteSpace:'nowrap'}}>
+                    <button className="btn btn-outline btn-xs" onClick={()=>{setEditing(r);setFormOpen(true)}}>Edit</button>
+                    <button className="btn btn-danger btn-xs" style={{marginLeft:4}} onClick={()=>setDeleting(r)}>Del</button>
+                  </td>
                 </tr>,
                 isOpen && (
                   <tr key={r.id+'-detail'}>
-                    <td colSpan="6" style={{background:'var(--bg3)',padding:'14px 20px',borderTop:'none'}}>
+                    <td colSpan="7" style={{background:'var(--bg3)',padding:'14px 20px',borderTop:'none'}}>
                       <div style={{fontSize:'9px',letterSpacing:'2px',textTransform:'uppercase',color:'var(--text3)',marginBottom:10}}>
                         Batch Allocations
                       </div>
@@ -419,7 +564,29 @@ export default function ProductRuns() {
         </table>
       </div>
 
-      <ProductRunForm open={formOpen} onClose={()=>setFormOpen(false)} onSaved={load}/>
+      <ProductRunForm open={formOpen} run={editing} onClose={()=>{setFormOpen(false);setEditing(null)}} onSaved={load}/>
+
+      {deleting && (
+        <div className="overlay open" onClick={e=>e.target===e.currentTarget&&setDeleting(null)}>
+          <div className="modal" style={{maxWidth:380}}>
+            <div className="modal-hd"><div className="modal-title">Delete Run</div></div>
+            <div className="modal-body" style={{textAlign:'center',padding:28}}>
+              <p style={{color:'var(--text2)',marginBottom:20,lineHeight:1.7}}>
+                Delete this run from <strong style={{color:'var(--text)'}}>{fmtDate(deleting.run_date)}</strong>?
+                <br/><span style={{fontSize:12,color:'var(--text3)'}}>Batch stock will NOT be automatically restored — adjust manually if needed.</span>
+              </p>
+              <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+                <button className="btn btn-outline" onClick={()=>setDeleting(null)}>Cancel</button>
+                <button className="btn btn-danger" onClick={async()=>{
+                  await supabase.from('batch_allocations').delete().eq('product_run_id', deleting.id)
+                  await supabase.from('product_runs').delete().eq('id', deleting.id)
+                  toast('Run deleted'); setDeleting(null); load()
+                }}>Delete</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
