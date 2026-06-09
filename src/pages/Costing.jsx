@@ -195,7 +195,10 @@ function ProductCosting({ products, batches, formats, greenStock, settings }) {
                   <div style={{padding:'12px 14px',borderRight:'1px solid var(--border)',background:'rgba(201,168,76,.04)'}}>
                     <div style={{fontSize:'8px',letterSpacing:'1.5px',textTransform:'uppercase',color:'var(--text3)',marginBottom:5}}>Recommended ({costData.wsMarkup}% markup)</div>
                     <div style={{fontFamily:'var(--font-mono)',fontSize:18,color:'var(--text2)',lineHeight:1}}>{R(recPrice)}</div>
-                    <div style={{fontSize:10,color:'var(--text3)',marginTop:3}}>{Pct(recMargin)} margin · {R(recPriceVat)} incl. VAT</div>
+                    <div style={{fontSize:10,color:'var(--text3)',marginTop:3}}>
+                      {Pct(recMargin)} margin
+                      {costData.vatEnabled && <> · {R(recPriceVat)} incl. VAT</>}
+                    </div>
                   </div>
                   <div style={{padding:'12px 14px',background:hasPrice?'rgba(61,107,58,.12)':'transparent'}}>
                     <div style={{fontSize:'8px',letterSpacing:'1.5px',textTransform:'uppercase',color:hasPrice?'var(--green2)':'var(--text3)',marginBottom:5}}>

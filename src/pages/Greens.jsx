@@ -366,8 +366,9 @@ function PurchaseHistory({ open, coffee, onClose, onSaved }) {
 
 // ── MAIN GREENS PAGE ─────────────────────────────────────────────
 export default function Greens() {
-  const [coffees, setCoffees] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [coffees, setCoffees]       = useState([])
+  const [roastedStock, setRoastedStock] = useState({}) // { coffee_id: kg }
+  const [loading, setLoading]       = useState(true)
   const [coffeeForm, setCoffeeForm] = useState({ open:false, coffee:null })
   const [purchaseForm, setPurchaseForm] = useState({ open:false, coffee:null })
   const [historyModal, setHistoryModal] = useState({ open:false, coffee:null })
@@ -376,14 +377,22 @@ export default function Greens() {
 
   const load = async () => {
     // Use the green_stock view which computes stock from purchases - roast usage
-    const { data, error } = await supabase.from('green_stock').select('*').order('created_at', { ascending: false })
-    if (error) {
-      // Fallback to green_coffees if view doesn't exist yet
+    const [stockRes, batchRes] = await Promise.all([
+      supabase.from('green_stock').select('*').order('created_at', { ascending: false }),
+      supabase.from('roasts').select('coffee_id, available_kg').eq('archived', false).neq('status', 'archived'),
+    ])
+    if (stockRes.error) {
       const { data: d2 } = await supabase.from('green_coffees').select('*').order('created_at', { ascending: false })
       setCoffees((d2||[]).map(c=>({...c, stock_kg:0, current_price_per_kg:c.default_price_per_kg||0})))
     } else {
-      setCoffees(data||[])
+      setCoffees(stockRes.data||[])
     }
+    // Aggregate roasted available_kg per coffee_id
+    const agg = {}
+    batchRes.data?.forEach(b => {
+      agg[b.coffee_id] = (agg[b.coffee_id]||0) + Number(b.available_kg||0)
+    })
+    setRoastedStock(agg)
     setLoading(false)
   }
 
@@ -428,12 +437,12 @@ export default function Greens() {
         <table>
           <thead><tr>
             <th>Coffee ID</th><th>Origin</th><th>Supplier</th><th>Process</th>
-            <th>Variety</th><th>Current Price</th><th>Stock</th><th>Cupping</th><th></th>
+            <th>Variety</th><th>Current Price</th><th>Green Stock</th><th>Roasted</th><th>Cupping</th><th></th>
           </tr></thead>
           <tbody>
-            {loading&&<tr><td colSpan="9"><div className="loading">Loading…</div></td></tr>}
+            {loading&&<tr><td colSpan="10"><div className="loading">Loading…</div></td></tr>}
             {!loading&&!coffees.length&&(
-              <tr><td colSpan="9"><div className="empty"><div className="empty-icon">◈</div>No coffees yet — add your first green coffee profile</div></td></tr>
+              <tr><td colSpan="10"><div className="empty"><div className="empty-icon">◈</div>No coffees yet — add your first green coffee profile</div></td></tr>
             )}
             {coffees.map(c=>{
               const stock = Number(c.stock_kg||0)
@@ -453,6 +462,12 @@ export default function Greens() {
                     {stock.toFixed(1)} kg
                     <br/><span className={`badge ${badgeCls}`}>{badgeTxt}</span>
                     {c.purchase_count>0&&<span className="td-muted" style={{marginLeft:6}}>{c.purchase_count} purchase{c.purchase_count>1?'s':''}</span>}
+                  </td>
+                  <td style={{fontFamily:'var(--font-mono)',fontSize:13,color:(()=>{
+                    const r=roastedStock[c.coffee_id]||0
+                    return r<=0?'var(--red2)':r<5?'var(--gold)':'var(--green2)'
+                  })()}}>
+                    {(roastedStock[c.coffee_id]||0).toFixed(1)} kg
                   </td>
                   <td>{c.cupping_score?c.cupping_score+' pts':'—'}</td>
                   <td>

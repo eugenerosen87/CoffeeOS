@@ -24,6 +24,7 @@ export default function Settings() {
       ws_markup: parseFloat(form.ws_markup)||0,
       rt_markup: parseFloat(form.rt_markup)||0,
       vat_rate: parseFloat(form.vat_rate)||15,
+      vat_enabled: form.vat_enabled !== false,
       roastery_name: form.roastery_name||'Specialty Roastery',
     }
     const { error } = await saveSettings(updates)
@@ -85,7 +86,41 @@ export default function Settings() {
         <div className="settings-grid">
           <div className="form-group"><label>Wholesale markup % (on cost)</label><input type="number" step="1" value={form.ws_markup||''} onChange={e => set('ws_markup', e.target.value)} /></div>
           <div className="form-group"><label>Retail markup % (on wholesale)</label><input type="number" step="1" value={form.rt_markup||''} onChange={e => set('rt_markup', e.target.value)} /></div>
-          <div className="form-group"><label>VAT rate %</label><input type="number" step="1" value={form.vat_rate||''} onChange={e => set('vat_rate', e.target.value)} /></div>
+          <div className="form-group">
+            <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',userSelect:'none'}}>
+              <span>VAT</span>
+              <span style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,fontSize:11,letterSpacing:'1px',textTransform:'none'}}>
+                <span style={{color: form.vat_enabled !== false ? 'var(--green2)' : 'var(--text3)'}}>
+                  {form.vat_enabled !== false ? 'On' : 'Off'}
+                </span>
+                <span
+                  onClick={()=>set('vat_enabled', form.vat_enabled === false)}
+                  style={{
+                    display:'inline-block', width:36, height:20, borderRadius:10, cursor:'pointer',
+                    background: form.vat_enabled !== false ? 'var(--green)' : 'var(--bg4)',
+                    border: '1px solid ' + (form.vat_enabled !== false ? 'var(--green2)' : 'var(--border2)'),
+                    position:'relative', transition:'background .2s',
+                  }}
+                >
+                  <span style={{
+                    position:'absolute', top:3,
+                    left: form.vat_enabled !== false ? 18 : 3,
+                    width:12, height:12, borderRadius:'50%',
+                    background: form.vat_enabled !== false ? 'var(--green2)' : 'var(--text3)',
+                    transition:'left .2s',
+                  }}/>
+                </span>
+              </span>
+            </label>
+            <input
+              type="number" step="1"
+              value={form.vat_rate||''}
+              onChange={e => set('vat_rate', e.target.value)}
+              placeholder="e.g. 15"
+              style={{opacity: form.vat_enabled !== false ? 1 : 0.4}}
+            />
+            <div className="form-hint">{form.vat_enabled !== false ? `${form.vat_rate||0}% added to selling prices` : 'VAT excluded from all price calculations'}</div>
+          </div>
         </div>
       </div>
     </div>

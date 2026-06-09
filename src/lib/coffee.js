@@ -66,7 +66,8 @@ export function calcBatchCost(batch, settings) {
 // unitsPacked : {format_id: units} from a product_run
 export function calcProductCost(recipe, formats, prices, settings, unitsPacked = {}) {
   const n = v => { const p = parseFloat(v); return isNaN(p) ? 0 : p }
-  const vatMulti = 1 + n(settings.vat_rate) / 100
+  const vatEnabled = settings.vat_enabled !== false
+  const vatMulti = vatEnabled ? 1 + n(settings.vat_rate) / 100 : 1
   const wsMulti  = 1 + n(settings.ws_markup) / 100
 
   // Weighted average cost per kg from recipe batches
@@ -108,7 +109,8 @@ export function calcProductCost(recipe, formats, prices, settings, unitsPacked =
   return {
     weightedCostPerKg, formatBreakdown,
     totalPackagingSpend, totalProfit,
-    wsMarkup: n(settings.ws_markup), vatRate: n(settings.vat_rate)
+    wsMarkup: n(settings.ws_markup), vatRate: n(settings.vat_rate),
+    vatEnabled: settings.vat_enabled !== false
   }
 }
 

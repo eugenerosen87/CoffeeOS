@@ -14,6 +14,7 @@ import Sales from './pages/Sales'
 import StockLedger from './pages/StockLedger'
 import Costing from './pages/Costing'
 import CertPage from './pages/CertPage'
+import ProductRuns from './pages/ProductRuns'
 import Settings from './pages/Settings'
 import './index.css'
 
@@ -41,6 +42,7 @@ export default function App() {
                 <Route path="/sales" element={<Sales />} />
                 <Route path="/ledger" element={<StockLedger />} />
                 <Route path="/costing" element={<Costing />} />
+                <Route path="/runs" element={<ProductRuns />} />
                 <Route path="/cert/:id" element={<CertPage />} />
                 <Route path="/settings" element={<Settings />} />
               </Routes>

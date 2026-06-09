@@ -78,10 +78,11 @@ function ProductForm({ open, product, greenStock, formats, onClose, onSaved }) {
     setSaving(false); toast(isEditing?'Product updated':'Product created'); onSaved(); onClose()
   }
 
-  const wsMarkup = n(settings.ws_markup)
-  const vatRate  = n(settings.vat_rate)
-  const wsMulti  = 1 + wsMarkup/100
-  const vatMulti = 1 + vatRate/100
+  const wsMarkup   = n(settings.ws_markup)
+  const vatRate    = n(settings.vat_rate)
+  const vatEnabled = settings.vat_enabled !== false
+  const wsMulti    = 1 + wsMarkup/100
+  const vatMulti   = vatEnabled ? 1 + vatRate/100 : 1
 
   if (!open) return null
   return (
@@ -178,7 +179,7 @@ function ProductForm({ open, product, greenStock, formats, onClose, onSaved }) {
                         <div style={{flex:1,background:'var(--bg4)',borderRadius:4,padding:'5px 8px',textAlign:'center',border:'1px dashed var(--border2)'}}>
                           <div style={{color:'var(--text3)',marginBottom:2}}>Rec. ({wsMarkup}%)</div>
                           <div style={{fontFamily:'var(--font-mono)',color:'var(--text2)',fontSize:11}}>R{recPrice.toFixed(2)}</div>
-                          <div style={{color:'var(--text3)',fontSize:9}}>R{recPriceVat.toFixed(2)} incl VAT</div>
+                          {vatEnabled && <div style={{color:'var(--text3)',fontSize:9}}>R{recPriceVat.toFixed(2)} incl VAT</div>}
                         </div>
                       </div>
                     )}

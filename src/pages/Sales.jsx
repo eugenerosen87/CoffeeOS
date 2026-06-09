@@ -6,8 +6,9 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 
 const CHANNELS = ['direct','wholesale','market','online','cafe','other']
 
-function SaleForm({ open, products, formats, onClose, onSaved }) {
+function SaleForm({ open, sale, products, formats, onClose, onSaved }) {
   const toast = useToast()
+  const isEditing = !!sale
   const [form, setForm] = useState({
     product_id:'', format_id:'', sale_date: new Date().toISOString().split('T')[0],
     units_sold:'', price_per_unit:'', channel:'direct', customer:'', note:''
@@ -16,11 +17,24 @@ function SaleForm({ open, products, formats, onClose, onSaved }) {
 
   useEffect(() => {
     if (!open) return
-    setForm({
-      product_id:'', format_id:'', sale_date: new Date().toISOString().split('T')[0],
-      units_sold:'', price_per_unit:'', channel:'direct', customer:'', note:''
-    })
-  }, [open])
+    if (isEditing) {
+      setForm({
+        product_id:    sale.product_id,
+        format_id:     sale.format_id,
+        sale_date:     sale.sale_date,
+        units_sold:    String(sale.units_sold),
+        price_per_unit:String(sale.price_per_unit),
+        channel:       sale.channel,
+        customer:      sale.customer||'',
+        note:          sale.note||'',
+      })
+    } else {
+      setForm({
+        product_id:'', format_id:'', sale_date: new Date().toISOString().split('T')[0],
+        units_sold:'', price_per_unit:'', channel:'direct', customer:'', note:''
+      })
+    }
+  }, [open, sale])
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
@@ -41,19 +55,24 @@ function SaleForm({ open, products, formats, onClose, onSaved }) {
     if (!form.price_per_unit) { toast('Enter price per unit', true); return }
     setSaving(true)
 
-    const { error } = await supabase.from('sales').insert({
-      product_id: form.product_id,
-      format_id: form.format_id,
-      sale_date: form.sale_date,
-      units_sold: parseInt(form.units_sold)||0,
+    const payload = {
+      product_id:     form.product_id,
+      format_id:      form.format_id,
+      sale_date:      form.sale_date,
+      units_sold:     parseInt(form.units_sold)||0,
       price_per_unit: parseFloat(form.price_per_unit)||0,
-      channel: form.channel,
-      customer: form.customer,
-      note: form.note,
-    })
+      channel:        form.channel,
+      customer:       form.customer,
+      note:           form.note,
+    }
+
+    const { error } = isEditing
+      ? await supabase.from('sales').update(payload).eq('id', sale.id)
+      : await supabase.from('sales').insert(payload)
+
     if (error) { toast('Error: '+error.message, true); setSaving(false); return }
     setSaving(false)
-    toast('Sale recorded')
+    toast(isEditing ? 'Sale updated' : 'Sale recorded')
     onSaved(); onClose()
   }
 
@@ -65,7 +84,7 @@ function SaleForm({ open, products, formats, onClose, onSaved }) {
     <div className="overlay open" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="modal" style={{maxWidth:520}}>
         <div className="modal-hd">
-          <div className="modal-title">Record Sale</div>
+          <div className="modal-title">{isEditing ? 'Edit Sale' : 'Record Sale'}</div>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
@@ -117,7 +136,7 @@ function SaleForm({ open, products, formats, onClose, onSaved }) {
         </div>
         <div className="form-actions">
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
-          <button className="btn btn-gold" onClick={handleSave} disabled={saving}>{saving?'Saving…':'Record Sale'}</button>
+          <button className="btn btn-gold" onClick={handleSave} disabled={saving}>{saving?'Saving…':isEditing?'Save Changes':'Record Sale'}</button>
         </div>
       </div>
     </div>
@@ -129,7 +148,7 @@ export default function Sales() {
   const [products, setProducts] = useState([])
   const [formats, setFormats]   = useState([])
   const [loading, setLoading]   = useState(true)
-  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing]   = useState(null)   // null=closed, 'new'=create, sale obj=edit
   const [deleting, setDeleting] = useState(null)
   const [filterProduct, setFilterProduct] = useState('')
   const [filterChannel, setFilterChannel] = useState('')
@@ -175,7 +194,7 @@ export default function Sales() {
     <div className="page">
       <div className="page-hd">
         <div><div className="page-title">Sales</div><div className="page-sub">Revenue & demand tracking</div></div>
-        <button className="btn btn-gold" onClick={()=>setFormOpen(true)}>+ Record Sale</button>
+        <button className="btn btn-gold" onClick={()=>setEditing('new')}>+ Record Sale</button>
       </div>
 
       <div className="stats-grid">
@@ -235,7 +254,10 @@ export default function Sales() {
                   R{(s.units_sold*s.price_per_unit).toFixed(2)}
                 </td>
                 <td>
-                  <button className="btn btn-danger btn-xs" onClick={()=>setDeleting(s)}>Del</button>
+                  <div style={{display:'flex',gap:4}}>
+                    <button className="btn btn-outline btn-xs" onClick={()=>setEditing(s)}>Edit</button>
+                    <button className="btn btn-danger btn-xs" onClick={()=>setDeleting(s)}>Del</button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -294,7 +316,12 @@ export default function Sales() {
         )
       })()}
 
-      <SaleForm open={formOpen} products={products} formats={formats} onClose={()=>setFormOpen(false)} onSaved={load}/>
+      <SaleForm
+        open={editing !== null}
+        sale={editing === 'new' ? null : editing}
+        products={products} formats={formats}
+        onClose={()=>setEditing(null)} onSaved={load}
+      />
 
       {deleting&&(
         <div className="overlay open" onClick={e=>e.target===e.currentTarget&&setDeleting(null)}>

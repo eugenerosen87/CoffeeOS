@@ -7,7 +7,7 @@ const DEFAULT_SETTINGS = {
   gas_rate: 0.80, elec_rate: 0.60, labour_rate: 120, default_hours: 1.5,
   bag_250_cost: 8.00, bag_1kg_cost: 22.00,
   sticker_250_cost: 3.00, sticker_1kg_cost: 3.00,
-  ws_markup: 40, rt_markup: 40, vat_rate: 15,
+  ws_markup: 40, rt_markup: 40, vat_rate: 15, vat_enabled: true,
   roastery_name: 'Specialty Roastery'
 }
 
