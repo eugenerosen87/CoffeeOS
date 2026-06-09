@@ -14,6 +14,9 @@ const STATUSES = [
   { key:'archived',  label:'Archived',  cls:'badge-done',  color:'var(--text3)' },
 ]
 
+const REST_DAYS_MIN = 5   // batch is ready to approve after this many days
+const REST_DAYS_PEAK = 14 // batch is past peak after this many days
+
 const STATUS_FLOW = {
   planned:   ['scheduled','roasting'],
   scheduled: ['roasting'],
@@ -67,9 +70,31 @@ export default function Batches() {
 
   const load = async () => {
     const { data } = await supabase.from('roasts').select('*').order('date',{ascending:false})
-    setBatches(data||[]); setLoading(false)
+    const rows = data || []
+    setBatches(rows); setLoading(false)
+    // Auto-advance resting batches that have completed their rest period
+    autoAdvanceResting(rows)
   }
   useEffect(()=>{ load() },[])
+
+  const autoAdvanceResting = async (rows) => {
+    const now = new Date()
+    const ready = rows.filter(b => {
+      if (b.status !== 'resting') return false
+      const days = Math.floor((now - new Date(b.date)) / 86400000)
+      return days >= REST_DAYS_MIN
+    })
+    if (!ready.length) return
+    const ids = ready.map(b => b.id)
+    const { error } = await supabase.from('roasts')
+      .update({ status: 'approved' })
+      .in('id', ids)
+    if (!error) {
+      toast(`${ready.length} batch${ready.length > 1 ? 'es' : ''} auto-approved — rest period complete`)
+      // Update local state immediately without a full reload
+      setBatches(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: 'approved' } : b))
+    }
+  }
 
   const handleStatusChange = async (batch, newStatus) => {
     const updates = { status: newStatus }
@@ -228,6 +253,9 @@ export default function Batches() {
               const estOutput = b.input_kg > 0
                 ? Number(b.input_kg) * (1 - avgLossPct)
                 : null
+              const days = Math.floor((now - new Date(b.date)) / 86400000)
+              const restPct = b.status === 'resting' ? Math.min(100, Math.round((days / REST_DAYS_MIN) * 100)) : null
+              const pastPeak = b.status === 'approved' && days > REST_DAYS_PEAK
               return (
                 <tr key={b.id} style={b.status==='archived'?{opacity:.55}:{}}>
                   <td className="td-id">{b.id}</td>
@@ -268,9 +296,26 @@ export default function Batches() {
                             <option key={s} value={s}>{STATUSES.find(x=>x.key===s)?.label||s}</option>
                           ))}
                         </select>
-                      : <span style={{cursor:'pointer'}} onClick={()=>setUpdatingStatus(b.id)} title="Click to change status">
-                          <StatusBadge status={b.status}/>
-                        </span>
+                      : <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                          <span style={{cursor:'pointer'}} onClick={()=>setUpdatingStatus(b.id)} title="Click to change status">
+                            <StatusBadge status={b.status}/>
+                          </span>
+                          {restPct !== null && (
+                            <div title={`Resting: ${days}/${REST_DAYS_MIN} days`} style={{display:'flex',flexDirection:'column',gap:2}}>
+                              <div style={{height:4,borderRadius:2,background:'var(--bg3)',width:72,overflow:'hidden'}}>
+                                <div style={{height:'100%',width:`${restPct}%`,background:restPct>=100?'var(--green2)':'var(--gold)',borderRadius:2,transition:'width .3s'}}/>
+                              </div>
+                              <span style={{fontSize:10,color:restPct>=100?'var(--green2)':'var(--text3)'}}>
+                                {restPct>=100?`Ready (${days}d)`:`${days}/${REST_DAYS_MIN}d`}
+                              </span>
+                            </div>
+                          )}
+                          {pastPeak && (
+                            <span style={{fontSize:10,color:'#c9a84c',fontWeight:600}} title={`${days} days since roast — past optimal window`}>
+                              ⚠ {days}d past peak
+                            </span>
+                          )}
+                        </div>
                     }
                   </td>
                   <td>
