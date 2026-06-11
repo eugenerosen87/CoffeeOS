@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useSettings } from '../lib/settings'
 
-export default function Sidebar({ open, onClose }) {
+export default function Sidebar({ open, onClose, onSignOut }) {
   const { settings } = useSettings()
   return (
     <div className={`sidebar${open?' open':''}`}>
@@ -40,6 +40,9 @@ export default function Sidebar({ open, onClose }) {
         Gas: <span>R{Number(settings.gas_rate||0).toFixed(2)}/kg</span><br/>
         Elec: <span>R{Number(settings.elec_rate||0).toFixed(2)}/kg</span><br/>
         Labour: <span>R{Number(settings.labour_rate||0).toFixed(0)}/hr</span>
+        <button className="btn btn-ghost btn-signout" onClick={onSignOut} title="Sign out">
+          ⏻ Sign Out
+        </button>
       </div>
     </div>
   )

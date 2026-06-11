@@ -170,6 +170,19 @@ textarea { resize: vertical; min-height: 60px; }
 /* LOADING */
 .loading { display: flex; align-items: center; justify-content: center; padding: 60px; color: var(--text3); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; }
 
+/* AUTH LOADING (full-screen splash while session resolves) */
+.auth-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: var(--bg); }
+
+/* LOGIN SCREEN */
+.login-screen { display: flex; align-items: center; justify-content: center; height: 100vh; background: var(--bg); padding: 20px; }
+.login-card { background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; padding: 40px 36px; width: 100%; max-width: 360px; }
+.login-logo { text-align: center; margin-bottom: 32px; }
+.login-form { display: flex; flex-direction: column; gap: 16px; }
+.login-error { background: #2a0808; border: 1px solid var(--red); color: var(--red2); font-size: 12px; padding: 9px 12px; border-radius: 5px; }
+
+/* SIGN OUT BUTTON in sidebar */
+.btn-signout { display: block; width: 100%; margin-top: 10px; color: var(--text3); font-size: 11px; letter-spacing: .5px; border-top: 1px solid var(--border); padding-top: 10px; text-align: left; }
+
 /* CERT STYLES */
 .cert-wrap { max-width: 820px; margin: 0 auto; }
 .cert { background: #faf6ee; border: 2.5px solid #2c4a2e; border-radius: 2px; position: relative; color: #2c1a0e; overflow: hidden; }
