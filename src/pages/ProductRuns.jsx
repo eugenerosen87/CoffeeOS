@@ -165,7 +165,7 @@ function ProductRunForm({ open, run, onClose, onSaved }) {
       if (!s?.batch_id)          { toast(`Select a batch for ${r.coffee_id}`, true); return }
       if (!(parseFloat(s.kg_to_use) > 0)) { toast(`Enter kg to use for ${r.coffee_id}`, true); return }
       const batch = availableBatches.find(b => b.id === s.batch_id)
-      if (batch && parseFloat(s.kg_to_use) > Number(batch.available_kg)) {
+      if (batch && parseFloat(s.kg_to_use) > Number(batch.available_kg) + 0.001) {
         toast(`${r.coffee_id}: ${s.kg_to_use} kg exceeds ${Number(batch.available_kg).toFixed(2)} kg available in ${s.batch_id}`, true)
         return
       }
@@ -458,20 +458,29 @@ function ProductRunForm({ open, run, onClose, onSaved }) {
 export default function ProductRuns() {
   const [runs, setRuns]         = useState([])
   const [formats, setFormats]   = useState([])
+  const [soldByRun, setSoldByRun] = useState({}) // { run_id: total_units_sold }
   const [loading, setLoading]   = useState(true)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing]   = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [expanding, setExpanding] = useState(null)
-  const [runDetails, setRunDetails] = useState({}) // { run_id: allocation[] }
+  const [runDetails, setRunDetails] = useState({}) // { run_id: { allocs, sales } }
   const toast = useToast()
 
   const load = async () => {
-    const [{ data:r },{ data:f }] = await Promise.all([
+    const [{ data:r },{ data:f },{ data:s }] = await Promise.all([
       supabase.from('product_runs').select('*, products(name)').order('run_date',{ascending:false}),
       supabase.from('formats').select('*').eq('active',true).order('sort_order'),
+      supabase.from('sales').select('product_run_id, units_sold').not('product_run_id','is',null),
     ])
     setRuns(r||[]); setFormats(f||[])
+    // Aggregate sold units per run
+    const soldMap = {}
+    s?.forEach(sale => {
+      if (sale.product_run_id)
+        soldMap[sale.product_run_id] = (soldMap[sale.product_run_id]||0) + (parseInt(sale.units_sold)||0)
+    })
+    setSoldByRun(soldMap)
     setLoading(false)
   }
 
@@ -480,8 +489,14 @@ export default function ProductRuns() {
   const handleExpand = async (runId) => {
     if (expanding === runId) { setExpanding(null); return }
     if (!runDetails[runId]) {
-      const { data } = await supabase.from('batch_allocations').select('*').eq('product_run_id', runId)
-      setRunDetails(d => ({ ...d, [runId]: data||[] }))
+      const [{ data: allocs }, { data: sales }] = await Promise.all([
+        supabase.from('batch_allocations').select('*').eq('product_run_id', runId),
+        supabase.from('sales').select('format_id, units_sold').eq('product_run_id', runId),
+      ])
+      // Build sold map { format_id: total_sold }
+      const soldMap = {}
+      sales?.forEach(s => { soldMap[s.format_id] = (soldMap[s.format_id]||0) + s.units_sold })
+      setRunDetails(d => ({ ...d, [runId]: { allocs: allocs||[], soldMap } }))
     }
     setExpanding(runId)
   }
@@ -520,12 +535,12 @@ export default function ProductRuns() {
       <div className="table-wrap">
         <table>
           <thead><tr>
-            <th>Date</th><th>Product</th><th>Total Kg</th><th>Units Packed</th><th>Notes</th><th></th><th></th>
+            <th>Date</th><th>Product</th><th>Total Kg</th><th>Units Packed</th><th>Available</th><th>Notes</th><th></th><th></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan="6"><div className="loading">Loading…</div></td></tr>}
+            {loading && <tr><td colSpan="8"><div className="loading">Loading…</div></td></tr>}
             {!loading && !runs.length && (
-              <tr><td colSpan="7">
+              <tr><td colSpan="8">
                 <div className="empty">
                   <div className="empty-icon">◉</div>
                   No product runs yet — click New Run to pack your first batch
@@ -555,6 +570,22 @@ export default function ProductRuns() {
                       : <span className="td-muted">—</span>
                     }
                   </td>
+                  <td>
+                    {(() => {
+                      const packed = r.units_packed
+                        ? Object.values(r.units_packed).reduce((s,v)=>s+(parseInt(v)||0),0)
+                        : 0
+                      const sold = soldByRun[r.id] || 0
+                      const avail = Math.max(0, packed - sold)
+                      if (!packed) return <span className="td-muted">—</span>
+                      return (
+                        <span style={{fontFamily:'var(--font-mono)',fontWeight:600,color:avail===0?'var(--text3)':avail<(packed*0.2)?'var(--amber)':'var(--green2)'}}>
+                          {avail}
+                          <span style={{color:'var(--text3)',fontWeight:400,fontSize:11}}> / {packed}</span>
+                        </span>
+                      )
+                    })()}
+                  </td>
                   <td className="td-muted">{r.notes||'—'}</td>
                   <td style={{color:'var(--text3)',fontSize:11,userSelect:'none'}}>{isOpen?'▲':'▼'}</td>
                   <td onClick={e=>e.stopPropagation()} style={{whiteSpace:'nowrap'}}>
@@ -564,11 +595,45 @@ export default function ProductRuns() {
                 </tr>,
                 isOpen && (
                   <tr key={r.id+'-detail'}>
-                    <td colSpan="7" style={{background:'var(--bg3)',padding:'14px 20px',borderTop:'none'}}>
-                      <div style={{fontSize:'9px',letterSpacing:'2px',textTransform:'uppercase',color:'var(--text3)',marginBottom:10}}>
+                    <td colSpan="8" style={{background:'var(--bg3)',padding:'14px 20px',borderTop:'none'}}>
+                      {/* Stock summary per format */}
+                      {r.units_packed && Object.keys(r.units_packed).length > 0 && (
+                        <>
+                          <div style={{fontSize:'9px',letterSpacing:'2px',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>
+                            Packed Stock
+                          </div>
+                          <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+                            {Object.entries(r.units_packed).map(([fid, packed]) => {
+                              const fmt = formats.find(f => f.id === fid)
+                              const sold = runDetails[r.id]?.soldMap?.[fid] || 0
+                              const remaining = Math.max(0, (parseInt(packed)||0) - sold)
+                              const pct = parseInt(packed) > 0 ? (sold / parseInt(packed)) * 100 : 0
+                              return (
+                                <div key={fid} style={{background:'var(--bg4)',border:'1px solid var(--border)',borderRadius:6,padding:'8px 12px',minWidth:140}}>
+                                  <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>{fmt?.name||fid.slice(0,8)}</div>
+                                  <div style={{fontFamily:'var(--font-mono)',fontSize:13}}>
+                                    <span style={{color:'var(--green2)'}}>{remaining}</span>
+                                    <span style={{color:'var(--text3)'}}> / {packed} remaining</span>
+                                  </div>
+                                  {sold > 0 && (
+                                    <>
+                                      <div style={{height:3,borderRadius:2,background:'var(--bg3)',marginTop:6,overflow:'hidden'}}>
+                                        <div style={{height:'100%',width:`${pct}%`,background:'var(--gold)',borderRadius:2}}/>
+                                      </div>
+                                      <div style={{fontSize:10,color:'var(--text3)',marginTop:3}}>{sold} sold</div>
+                                    </>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </>
+                      )}
+                      {/* Batch allocations */}
+                      <div style={{fontSize:'9px',letterSpacing:'2px',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>
                         Batch Allocations
                       </div>
-                      {(runDetails[r.id]||[]).map(a=>(
+                      {(runDetails[r.id]?.allocs||[]).map(a=>(
                         <div key={a.id} style={{display:'flex',gap:16,fontSize:12,marginBottom:6,alignItems:'center'}}>
                           <span style={{fontFamily:'var(--font-mono)',color:'var(--gold)',minWidth:130}}>{a.batch_id}</span>
                           <span style={{color:'var(--text2)',minWidth:90}}>{a.coffee_id}</span>
@@ -578,7 +643,7 @@ export default function ProductRuns() {
                           </span>
                         </div>
                       ))}
-                      {(runDetails[r.id]||[]).length === 0 && (
+                      {(runDetails[r.id]?.allocs||[]).length === 0 && (
                         <div style={{color:'var(--text3)',fontSize:12}}>No allocation detail recorded.</div>
                       )}
                     </td>

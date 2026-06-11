@@ -60,6 +60,9 @@ export default function Batches() {
   const [loading, setLoading]           = useState(true)
   const [showArchived, setShowArchived] = useState(false)
   const [statusFilter, setStatusFilter] = useState('all')
+  const [originFilter, setOriginFilter] = useState('')
+  const [roastFilter,  setRoastFilter]  = useState('')
+  const [roasterFilter, setRoasterFilter] = useState('')
   const [formOpen, setFormOpen]         = useState(false)
   const [editing, setEditing]           = useState(null)
   const [deleting, setDeleting]         = useState(null)
@@ -162,8 +165,18 @@ export default function Batches() {
   const filtered = batches.filter(b => {
     if (!showArchived && b.status === 'archived') return false
     if (statusFilter !== 'all' && b.status !== statusFilter) return false
+    if (originFilter  && b.coffee_id !== originFilter) return false
+    if (roastFilter   && b.roast_level !== roastFilter) return false
+    if (roasterFilter && (b.roaster_name||'') !== roasterFilter) return false
     return true
   })
+
+  // Unique values for filter dropdowns (from non-archived batches unless showing archived)
+  const filterBase = showArchived ? batches : active
+  const origins  = [...new Set(filterBase.map(b=>b.coffee_id).filter(Boolean))].sort()
+  const roastLevels = [...new Set(filterBase.map(b=>b.roast_level).filter(Boolean))]
+  const roasters = [...new Set(filterBase.map(b=>b.roaster_name).filter(Boolean))].sort()
+  const hasFilters = originFilter || roastFilter || roasterFilter
 
   // Stats
   const inPeak    = active.filter(b=>{ const d=Math.floor((now-new Date(b.date))/86400000); return d>=5&&d<=14 }).length
@@ -205,7 +218,7 @@ export default function Batches() {
       </div>
 
       {/* Status filter tabs */}
-      <div style={{display:'flex',gap:6,marginBottom:16,flexWrap:'wrap'}}>
+      <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap'}}>
         {[['all','All'],['planned','Planned'],['scheduled','Scheduled'],['roasting','Roasting'],['resting','Resting'],['approved','Approved']].map(([k,l])=>(
           <button
             key={k}
@@ -219,6 +232,36 @@ export default function Batches() {
             }}
           >{l}</button>
         ))}
+      </div>
+
+      {/* Additional filters */}
+      <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+        {origins.length > 1 && (
+          <select value={originFilter} onChange={e=>setOriginFilter(e.target.value)} style={{fontSize:12,padding:'4px 8px',minWidth:140}}>
+            <option value="">All origins</option>
+            {origins.map(o=><option key={o} value={o}>{o}</option>)}
+          </select>
+        )}
+        {roastLevels.length > 1 && (
+          <select value={roastFilter} onChange={e=>setRoastFilter(e.target.value)} style={{fontSize:12,padding:'4px 8px',minWidth:140}}>
+            <option value="">All roast levels</option>
+            {roastLevels.map(r=><option key={r} value={r}>{ROAST_NAMES[r]||r}</option>)}
+          </select>
+        )}
+        {roasters.length > 1 && (
+          <select value={roasterFilter} onChange={e=>setRoasterFilter(e.target.value)} style={{fontSize:12,padding:'4px 8px',minWidth:130}}>
+            <option value="">All roasters</option>
+            {roasters.map(r=><option key={r} value={r}>{r}</option>)}
+          </select>
+        )}
+        {hasFilters && (
+          <button className="btn btn-ghost btn-sm" onClick={()=>{setOriginFilter('');setRoastFilter('');setRoasterFilter('')}}>
+            Clear filters
+          </button>
+        )}
+        {(hasFilters || statusFilter !== 'all') && (
+          <span style={{fontSize:11,color:'var(--text3)',marginLeft:4}}>{filtered.length} batch{filtered.length!==1?'es':''}</span>
+        )}
       </div>
 
       <div className="table-wrap">

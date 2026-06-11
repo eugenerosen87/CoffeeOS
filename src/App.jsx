@@ -10,6 +10,7 @@ import Packaging from './pages/Packaging'
 import Products from './pages/Products'
 import Formats from './pages/Formats'
 import Suppliers from './pages/Suppliers'
+import Customers from './pages/Customers'
 import Sales from './pages/Sales'
 import StockLedger from './pages/StockLedger'
 import Costing from './pages/Costing'
@@ -39,6 +40,7 @@ export default function App() {
                 <Route path="/products" element={<Products />} />
                 <Route path="/formats" element={<Formats />} />
                 <Route path="/suppliers" element={<Suppliers />} />
+                <Route path="/customers" element={<Customers />} />
                 <Route path="/sales" element={<Sales />} />
                 <Route path="/ledger" element={<StockLedger />} />
                 <Route path="/costing" element={<Costing />} />

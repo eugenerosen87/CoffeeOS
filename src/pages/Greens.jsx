@@ -364,7 +364,89 @@ function PurchaseHistory({ open, coffee, onClose, onSaved }) {
   )
 }
 
-// ── MAIN GREENS PAGE ─────────────────────────────────────────────
+// ── WITHDRAWAL HISTORY MODAL ─────────────────────────────────────
+function WithdrawalHistory({ open, coffee, onClose }) {
+  const [rows, setRows]       = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!open || !coffee) return
+    setLoading(true)
+    supabase
+      .from('inventory_movements')
+      .select('*, roasts(id, date, roast_level, status)')
+      .eq('coffee_id', coffee.coffee_id)
+      .in('movement_type', ['roast_out', 'waste_out'])
+      .order('created_at', { ascending: false })
+      .then(({ data }) => { setRows(data||[]); setLoading(false) })
+  }, [open, coffee])
+
+  if (!open || !coffee) return null
+
+  const totalKg  = rows.filter(r=>r.movement_type==='roast_out').reduce((s,r)=>s+Number(r.quantity_kg||0),0)
+  const wasteKg  = rows.filter(r=>r.movement_type==='waste_out').reduce((s,r)=>s+Number(r.quantity_kg||0),0)
+  const batches  = new Set(rows.map(r=>r.reference_id)).size
+
+  return (
+    <div className="overlay open" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:640}}>
+        <div className="modal-hd">
+          <div className="modal-title">Withdrawal History — {coffee.coffee_id}</div>
+          <button className="btn btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body" style={{padding:'16px 26px'}}>
+          {loading ? <div className="loading">Loading…</div> : (
+            <>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:16}}>
+                {[['Roasted',totalKg.toFixed(1)+' kg'],['Waste',wasteKg.toFixed(1)+' kg'],['Batches',batches]].map(([l,v])=>(
+                  <div key={l} style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:6,padding:'10px 12px',textAlign:'center'}}>
+                    <div style={{fontSize:'8px',letterSpacing:'2px',textTransform:'uppercase',color:'var(--text3)',marginBottom:4}}>{l}</div>
+                    <div style={{fontFamily:'var(--font-mono)',fontSize:15,color:'var(--gold)'}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {!rows.length
+                ? <div className="empty">No withdrawals recorded yet</div>
+                : <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Roast Level</th><th>Batch</th><th>Note</th></tr></thead>
+                      <tbody>
+                        {rows.map(r => {
+                          const isWaste = r.movement_type === 'waste_out'
+                          const roast   = r.roasts
+                          return (
+                            <tr key={r.id}>
+                              <td>{fmtDate(roast?.date || r.created_at)}</td>
+                              <td>
+                                <span style={{fontSize:10,fontWeight:600,letterSpacing:'.5px',padding:'2px 7px',borderRadius:3,
+                                  background: isWaste ? 'rgba(139,58,42,.25)' : 'rgba(var(--gold-rgb),.15)',
+                                  color: isWaste ? 'var(--red2)' : 'var(--gold)'}}>
+                                  {isWaste ? 'Waste' : 'Roast'}
+                                </span>
+                              </td>
+                              <td style={{fontFamily:'var(--font-mono)',color: isWaste ? 'var(--red2)' : 'var(--text)'}}>
+                                {Number(r.quantity_kg).toFixed(3)} kg
+                              </td>
+                              <td className="td-muted">{roast?.roast_level||'—'}</td>
+                              <td style={{fontFamily:'var(--font-mono)',fontSize:11,color:'var(--text3)'}}>{r.reference_id?.slice(0,8)||'—'}</td>
+                              <td className="td-muted" style={{maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.note||'—'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+              }
+            </>
+          )}
+        </div>
+        <div className="form-actions">
+          <button className="btn btn-gold" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 export default function Greens() {
   const [coffees, setCoffees]       = useState([])
   const [roastedStock, setRoastedStock] = useState({}) // { coffee_id: kg }
@@ -372,6 +454,7 @@ export default function Greens() {
   const [coffeeForm, setCoffeeForm] = useState({ open:false, coffee:null })
   const [purchaseForm, setPurchaseForm] = useState({ open:false, coffee:null })
   const [historyModal, setHistoryModal] = useState({ open:false, coffee:null })
+  const [withdrawalModal, setWithdrawalModal] = useState({ open:false, coffee:null })
   const [deleting, setDeleting] = useState(null)
   const toast = useToast()
 
@@ -473,7 +556,8 @@ export default function Greens() {
                   <td>
                     <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
                       <button className="btn btn-gold btn-xs" onClick={()=>setPurchaseForm({open:true,coffee:c})}>+ Buy</button>
-                      <button className="btn btn-outline btn-xs" onClick={()=>setHistoryModal({open:true,coffee:c})}>History</button>
+                      <button className="btn btn-outline btn-xs" onClick={()=>setHistoryModal({open:true,coffee:c})}>Buys</button>
+                      <button className="btn btn-outline btn-xs" onClick={()=>setWithdrawalModal({open:true,coffee:c})}>Uses</button>
                       <button className="btn btn-outline btn-xs" onClick={()=>setCoffeeForm({open:true,coffee:c})}>Edit</button>
                       <button className="btn btn-danger btn-xs" onClick={()=>setDeleting(c)}>Del</button>
                     </div>
@@ -497,6 +581,10 @@ export default function Greens() {
         open={historyModal.open} coffee={historyModal.coffee}
         onClose={()=>setHistoryModal({open:false,coffee:null})}
         onSaved={load}
+      />
+      <WithdrawalHistory
+        open={withdrawalModal.open} coffee={withdrawalModal.coffee}
+        onClose={()=>setWithdrawalModal({open:false,coffee:null})}
       />
 
       {deleting&&(
