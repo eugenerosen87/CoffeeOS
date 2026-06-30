@@ -19,6 +19,7 @@ import Costing from './pages/Costing'
 import CertPage from './pages/CertPage'
 import ProductRuns from './pages/ProductRuns'
 import Settings from './pages/Settings'
+import PriceList from './pages/PriceList'
 import './index.css'
 
 function AuthenticatedApp() {
@@ -46,6 +47,7 @@ function AuthenticatedApp() {
               <Route path="/sales" element={<Sales />} />
               <Route path="/ledger" element={<StockLedger />} />
               <Route path="/costing" element={<Costing />} />
+              <Route path="/pricelist" element={<PriceList />} />
               <Route path="/runs" element={<ProductRuns />} />
               <Route path="/cert/:id" element={<CertPage />} />
               <Route path="/settings" element={<Settings />} />

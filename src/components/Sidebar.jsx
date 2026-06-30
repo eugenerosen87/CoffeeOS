@@ -27,6 +27,7 @@ export default function Sidebar({ open, onClose, onSignOut }) {
         <div className="nav-section">Products & Pricing</div>
         <NavLink to="/products" className={({isActive})=>`nav-item${isActive?' active':''}`}><span className="nav-icon">◉</span> Products</NavLink>
         <NavLink to="/formats" className={({isActive})=>`nav-item${isActive?' active':''}`}><span className="nav-icon">◧</span> Formats</NavLink>        <NavLink to="/runs" className={({isActive})=>`nav-item${isActive?' active':''}`}><span className="nav-icon">◐</span> Product Runs</NavLink>
+        <NavLink to="/pricelist" className={({isActive})=>`nav-item${isActive?' active':''}`}><span className="nav-icon">▦</span> Price List</NavLink>
         <div className="nav-section">Sales & Finance</div>
         <NavLink to="/sales" className={({isActive})=>`nav-item${isActive?' active':''}`}><span className="nav-icon">◆</span> Sales</NavLink>
         <NavLink to="/customers" className={({isActive})=>`nav-item${isActive?' active':''}`}><span className="nav-icon">◑</span> Customers</NavLink>
